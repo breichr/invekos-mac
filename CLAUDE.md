@@ -12,7 +12,8 @@ plattformunabhängiges Python-Skript nach.
 - `src/hexagon_launcher.py` implementiert den Ablauf (Descriptor laden → Ressourcen laden → Java starten).
   Gegen einen Fake-Server getestet (`tests/`), **noch nicht gegen den echten AMA-Server**.
 - Echter Descriptor geholt (`--inspect`, 2026-10-13) – Ergebnis unten, „Echter AMA-Descriptor".
-- Offen: erster echter Start → siehe „Nächste Schritte".
+- **Erster echter Start (2026-10-13, Apple Silicon, Liberica 21 Full arm64): Smart Client 16.7.19.1
+  startet und verbindet sich** („Connected To: G02/M02"). Probleme siehe „Erster Start".
 
 ## Echter AMA-Descriptor (anonymisiert)
 - `appName` GeoMedia Smart Client, `version` 1.17.2.0, `mainClass` `com.intergraph.web.SmartClient`,
@@ -30,6 +31,15 @@ plattformunabhängiges Python-Skript nach.
   windows/amd64, windows/x86; `gmsc-jni-geolocator` nur windows/amd64 (Standortbestimmung).
   Auf Apple Silicon (arm64-JDK, `os.arch=aarch64`) passt keine → ECW-Raster evtl. nicht lesbar.
   Ausweg falls nötig: x86_64-JDK unter Rosetta (Launcher filtert nach `os.arch` des gestarteten Java).
+
+## Erster Start – Befunde
+- Kartenhintergrund kommt über **ECW/IWS** (`com.intergraph.web.plugin.ecw.IWSLoader`), nicht WMS →
+  braucht die native `ecwjp2`-Bibliothek. Auf arm64: `UnsatisfiedLinkError … NCSEcw_javaJNI.swig_module_init`.
+  Es gibt nur `mac os x/x86_64`-Natives → **x86_64-JDK unter Rosetta** nötig.
+- `IllegalAccessException` für `com.apple.eawt.FullScreenUtilities` (Vollbild-Button) →
+  Launcher setzt auf macOS `--add-opens java.desktop/com.apple.eawt=ALL-UNNAMED`.
+- Harmlos: Warnung „COMPAT locale provider will be removed", WSP0075/WSP0019 (JAX-WS-Policy).
+- Cache-Namen kommen jetzt aus dem `resource`-Parameter (vorher alle `…_downloads`).
 
 ## Kernerkenntnisse (Kurzfassung)
 - Der Launcher ist selbst Java (JavaFX), per jlink in `modules` eingebettet; Module
@@ -61,9 +71,9 @@ plattformunabhängiges Python-Skript nach.
 
 ## Nächste Schritte
 1. ~~Descriptor holen und auswerten~~ (erledigt, siehe oben).
-2. `brew bundle` (JDK 21 Full), dann Start mit `--jdk 21` (frische hnlps-URL, Session läuft ab).
-3. Fehler/Stacktraces analysieren (JavaFX-Konflikt mit `-win`-JARs, fehlende Natives, Pfade).
-   Prüfen, ob Orthofotos ohne `ecwjp2`-Natives angezeigt werden (vermutlich per WMS/WMTS → ja).
+2. ~~Erster Start mit JDK 21 arm64~~ (läuft, Karte ohne ECW-Hintergrund).
+3. Class-File-Version des Smart Client prüfen (≤ 61 → läuft auf Java 17), dann x86_64-JDK per
+   Intel-Homebrew (`/usr/local`) unter Rosetta installieren und ECW-Natives testen.
 4. Beim ersten echten Start: angezeigten Signer (Hexagon-Zertifikat?) prüfen und bestätigen.
 5. Optional: `hnlps://`-URL-Handler als kleine macOS-App (z. B. AppleScript/Platypus oder
    Swift-Stub), damit der Button in eAMA direkt startet.

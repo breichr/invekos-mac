@@ -31,6 +31,7 @@ import re
 import shutil
 import subprocess
 import sys
+import urllib.parse
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -120,9 +121,23 @@ def summarize(d: dict, plat: tuple) -> None:
 def safe_name(href: str, res_hash: str = None) -> str:
     """Cache-Dateiname. Wie im Original ist `hash` der Cache-Schlüssel: neuer Hash
     (neue Version unter gleicher URL) -> neue Datei. Ohne Hash: Schlüssel = URL."""
-    name = href.split("?")[0].rstrip("/").split("/")[-1] or "res"
+    url = urllib.parse.urlsplit(href)
+    # AMA: …/downloads?resource=jars%2fgmsc-16.7.19.1.jar&type=jar -> Name aus `resource`
+    name = urllib.parse.parse_qs(url.query).get("resource", [url.path])[0]
+    name = re.sub(r"[^A-Za-z0-9._-]", "_", name.rstrip("/").split("/")[-1]) or "res"
     key = f"{href}#{res_hash}" if res_hash else href
     return hashlib.sha1(key.encode()).hexdigest()[:10] + "_" + name
+
+
+NATIVE_SUFFIXES = (".dylib", ".jnilib", ".so", ".dll")
+
+
+def native_dirs(root: Path) -> list:
+    """Alle Ordner im entpackten Natives-ZIP, die native Bibliotheken enthalten
+    (java.library.path sucht nicht rekursiv)."""
+    dirs = sorted({str(f.parent) for f in root.rglob("*")
+                   if f.is_file() and f.name.lower().endswith(NATIVE_SUFFIXES)})
+    return dirs or [str(root)]
 
 
 def jdk_tool(java: str, name: str) -> str:
@@ -267,14 +282,18 @@ def main() -> int:
             if not out.exists():
                 with zipfile.ZipFile(target) as z:
                     z.extractall(out)
-            natives.append(str(out))
+            natives += native_dirs(out)
 
     if skipped_native:
         print("\n⚠ Native Bibliotheken nur für andere Systeme vorhanden (evtl. Funktionen fehlen):")
         for s in skipped_native:
             print("   ", s)
 
-    cmd = [a.java, *map(expand_vars, d.get("jvmArgs", [])),
+    extra = []
+    if plat[0].startswith("mac"):
+        # Smart Client nutzt com.apple.eawt (Vollbild-Button), seit Java 9 nicht mehr exportiert
+        extra += ["--add-opens", "java.desktop/com.apple.eawt=ALL-UNNAMED"]
+    cmd = [a.java, *map(expand_vars, d.get("jvmArgs", [])), *extra,
            "-cp", os.pathsep.join(jars),
            f"-Djava.library.path={os.pathsep.join(natives)}",
            d["mainClass"], *map(expand_vars, d.get("appArgs", []))]

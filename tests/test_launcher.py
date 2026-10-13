@@ -1,6 +1,7 @@
 """End-to-end-Test gegen einen lokalen Fake-Server (nur Standardbibliothek + JDK)."""
 import functools
 import hashlib
+import importlib.util
 import http.server
 import json
 import os
@@ -128,7 +129,8 @@ class LauncherE2E(unittest.TestCase):
                              capture_output=True, text=True).stderr
         props = dict(re.findall(r"^\s*(os\.name|os\.arch) = (.*?)\s*$", out, re.M))
         with zipfile.ZipFile(self.srv / "own.jar", "w") as z:
-            z.writestr("libown.so", "x")
+            z.writestr("META-INF/MANIFEST.MF", "x")
+            z.writestr("native/osx/libown.so", "x")
         self.descriptor["resources"] += [
             {"type": "nativelib", "href": "own.jar", "os": props["os.name"], "arch": props["os.arch"]},
             {"type": "nativelib", "href": "other.jar", "os": props["os.name"], "arch": "sparc"},
@@ -140,7 +142,7 @@ class LauncherE2E(unittest.TestCase):
         self.assertIn(f"os={props['os.name'].lower()} arch={props['os.arch'].lower()}", r.stdout)
         natives = list((self.tmp / ".hexagon-applauncher-mac" / "cache").glob("*own.jar.d"))
         self.assertEqual(len(natives), 1)
-        self.assertIn(f"-Djava.library.path={natives[0]} ", r.stdout)
+        self.assertIn(f"-Djava.library.path={natives[0] / 'native' / 'osx'} ", r.stdout)
         self.assertIn("other.jar", r.stdout)  # andere Architektur -> übersprungen
         appdata = self.tmp / ("Library/Application Support" if sys.platform == "darwin" else ".local/share")
         self.assertIn(f"HELLO args=dir={appdata}/X,keep=%UNBEKANNT%", r.stdout)
@@ -195,6 +197,22 @@ class LauncherE2E(unittest.TestCase):
         r = self.run_launcher()
         self.assertIn("lade app.jar", r.stdout)
         self.assertIn("NEU args=", r.stdout)
+
+
+def load_launcher():
+    spec = importlib.util.spec_from_file_location("hexagon_launcher", LAUNCHER)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+class Units(unittest.TestCase):
+    def test_safe_name_ama_resource(self):
+        hl = load_launcher()
+        href = "https://h/GMSC/api/v1/hnlp/smartclient/downloads?resource=jars%2fgmsc-16.7.19.1.jar&type=jar"
+        self.assertTrue(hl.safe_name(href).endswith("_gmsc-16.7.19.1.jar"))
+        self.assertNotEqual(hl.safe_name(href, "a"), hl.safe_name(href, "b"))
+        self.assertTrue(hl.safe_name("http://h/x/app.jar").endswith("_app.jar"))
 
 
 if __name__ == "__main__":
