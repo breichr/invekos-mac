@@ -1,0 +1,14 @@
+{
+  "codebase": "http://127.0.0.1:{PORT}/",
+  "version": "1.0",
+  "appName": "Test",
+  "mainClass": "Hello",
+  "jvmArgs": ["-Dx=1"],
+  "appArgs": ["site=demo"],
+  "resources": [
+    {"type": "jre", "href": "jre.zip", "os": "windows"},
+    {"type": "jar", "href": "app.jar"},
+    {"type": "nativelib", "href": "win.zip", "os": "windows"},
+    {"type": "setup", "href": "setup.exe"}
+  ]
+}
