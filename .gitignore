@@ -1,0 +1,14 @@
+# Analyse-Arbeitsordner (enthält Hexagon-Binaries / dekompilierten Code)
+work/
+*.exe
+*.msi
+*.cab
+
+# echte Descriptoren / URLs enthalten Session-Token
+descriptor*.json
+!tests/fixtures/descriptor.json
+*.hnlps.txt
+
+.hexagon-applauncher-mac/
+__pycache__/
+.DS_Store
