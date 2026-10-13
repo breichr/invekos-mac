@@ -75,9 +75,12 @@ def summarize(d: dict) -> None:
     print("\n(OK = passt laut os/arch-Filter zu diesem Mac, -- = für anderes System)")
 
 
-def safe_name(href: str) -> str:
+def safe_name(href: str, res_hash: str = None) -> str:
+    """Cache-Dateiname. Wie im Original ist `hash` der Cache-Schlüssel: neuer Hash
+    (neue Version unter gleicher URL) -> neue Datei. Ohne Hash: Schlüssel = URL."""
     name = href.split("?")[0].rstrip("/").split("/")[-1] or "res"
-    return hashlib.sha1(href.encode()).hexdigest()[:10] + "_" + name
+    key = f"{href}#{res_hash}" if res_hash else href
+    return hashlib.sha1(key.encode()).hexdigest()[:10] + "_" + name
 
 
 def main() -> int:
@@ -116,7 +119,7 @@ def main() -> int:
             skipped_native.append(r["href"])
             continue
         # JARs sind plattformunabhängig – Filter nur, wenn eine Mac-Variante existiert
-        target = cache / safe_name(href)
+        target = cache / safe_name(href, r.get("hash"))
         if not target.exists():
             print(f"lade {r['href']}")
             target.write_bytes(fetch(href))
