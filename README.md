@@ -32,6 +32,22 @@ ob man dem Herausgeber (Zertifikat, SHA-256-Fingerabdruck) vertraut. Die Antwort
 
 Der Link ist ein Zugangsschlüssel zur Session – nicht weitergeben oder committen.
 
+## Apple Silicon: Kartenhintergrund (ECW)
+Den Orthofoto-Hintergrund liest der Smart Client im ECW-Format über eine native Bibliothek,
+die es für macOS nur als Intel-Version (`x86_64`) gibt. Mit dem Apple-Silicon-Java startet der
+Client, die Karte bleibt aber ohne Hintergrund. Abhilfe: ein Intel-Java 17 unter Rosetta,
+installiert über ein zweites Homebrew für Intel unter `/usr/local`. Der Smart Client ist für
+Java 10 gebaut, Java 17 reicht. Das Apple-Silicon-Java 21 bleibt daneben bestehen.
+```sh
+softwareupdate --install-rosetta --agree-to-license
+arch -x86_64 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+arch -x86_64 /usr/local/bin/brew tap bell-sw/liberica
+arch -x86_64 /usr/local/bin/brew trust bell-sw/liberica
+arch -x86_64 /usr/local/bin/brew install --cask liberica-jdk17-full
+python3 src/hexagon_launcher.py --jdk 17 'hnlps://…'
+```
+In der Ausgabe muss `Plattform : os=mac os x arch=x86_64` stehen.
+
 ## Aufbau
 | Pfad | Inhalt |
 |---|---|

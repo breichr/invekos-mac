@@ -40,6 +40,11 @@ plattformunabhängiges Python-Skript nach.
   Launcher setzt auf macOS `--add-opens java.desktop/com.apple.eawt=ALL-UNNAMED`. (2. Start: Fehler weg).
 - Harmlos: Warnung „COMPAT locale provider will be removed", WSP0075/WSP0019 (JAX-WS-Policy).
 - Cache-Namen kommen jetzt aus dem `resource`-Parameter (vorher alle `…_downloads`).
+- Class-File-Version `com.intergraph.web.SmartClient`: **54 (Java 10)** → Java 17 reicht.
+- JAR-Signer (bestätigt): `CN=Intergraph Corporation, O=Intergraph Corporation, L=Madison, ST=Alabama, C=US`
+  (SHA-256 `9A:7B:52:D7:8C:31:27:F7:10:66:48:F1:BB:28:84:36:FB:C1:D6:94:84:73:0A:72:C0:4D:7D:61:E8:B8:C0:E0`)
+  und `CN=Agrarmarkt Austria, OU=AMA, O=Agrarmarkt Austria, L=Wien, ST=Wien, C=AT`
+  (SHA-256 `D3:41:86:2C:19:56:4F:08:0E:CB:D5:D7:B6:99:D6:67:A9:98:29:99:6A:8A:1E:79:5C:A0:11:7D:29:3B:4F:37`).
 - 2. Start (2026-10-13): alle JARs signaturgeprüft geladen, Verbindung ok („Connected To: G01/M02"),
   ECW-Fehler wie erwartet (arm64).
 
@@ -74,8 +79,8 @@ plattformunabhängiges Python-Skript nach.
 ## Nächste Schritte
 1. ~~Descriptor holen und auswerten~~ (erledigt, siehe oben).
 2. ~~Erster Start mit JDK 21 arm64~~ (läuft, Karte ohne ECW-Hintergrund).
-3. Class-File-Version des Smart Client prüfen (≤ 61 → läuft auf Java 17), dann x86_64-JDK per
-   Intel-Homebrew (`/usr/local`) unter Rosetta installieren und ECW-Natives testen.
+3. ~~Class-File-Version prüfen~~ (54 → Java 17 ok). Intel-JDK 17 per Intel-Homebrew (`/usr/local`)
+   unter Rosetta installieren (README „Apple Silicon") und ECW-Natives testen.
 4. Beim ersten echten Start: angezeigten Signer (Hexagon-Zertifikat?) prüfen und bestätigen.
 5. Optional: `hnlps://`-URL-Handler als kleine macOS-App (z. B. AppleScript/Platypus oder
    Swift-Stub), damit der Button in eAMA direkt startet.
