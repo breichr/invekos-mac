@@ -24,7 +24,10 @@ plattformunabhängiges Python-Skript nach.
 - Start im Original: `<cache>/<jre>/bin/java.exe <jvmArgs> -cp <jars;> -Djava.library.path=<natives;>
   -Djavafx.cachedir=… <proxy -D…> <mainClass> <appArgs>`.
 - JARs werden im Original signaturgeprüft (`JarVerifier`, Nutzer muss Signer bestätigen).
-  Unser Skript prüft (noch) nicht.
+  Unser Skript prüft beim Download mit `jarsigner -verify` (ungültig, unsigniert oder
+  unsignierte Einträge → Abbruch), Signer per `keytool -printcert -jarfile` (SHA-256),
+  bestätigte Signer in `~/.hexagon-applauncher-mac/trusted_signers.json`.
+  Im Cache liegen nur geprüfte JARs (`--no-verify` → separate `unverified_*`-Dateien).
 
 ## Leitplanken
 - **Keine dekompilierten Hexagon-Quellen, Binaries oder die .exe committen** (Urheberrecht).
@@ -45,7 +48,7 @@ plattformunabhängiges Python-Skript nach.
    gibt es `nativelib` nur für `windows`? Wenn ja: Inhalt der ZIPs prüfen (welche DLLs, wofür).
 3. Starten mit `--jdk <N>`; Fehler/Stacktraces analysieren (fehlende natives, JavaFX, Pfad-Trenner,
    Windows-spezifische Pfade in jvmArgs/appArgs).
-4. Optional: JAR-Signaturprüfung (`jarsigner -verify`) einbauen.
+4. Beim ersten echten Start: angezeigten Signer (Hexagon-Zertifikat?) prüfen und bestätigen.
 5. Optional: `hnlps://`-URL-Handler als kleine macOS-App (z. B. AppleScript/Platypus oder
    Swift-Stub), damit der Button in eAMA direkt startet.
 6. Optional: Brew-Formel/Cask im eigenen Tap.

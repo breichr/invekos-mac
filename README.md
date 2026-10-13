@@ -24,6 +24,11 @@ brew bundle            # Liberica JDK 17 Full (mit JavaFX), p7zip
    python3 src/hexagon_launcher.py --jdk 17 'hnlps://…'
    ```
 
+Beim ersten Download prüft der Launcher die JAR-Signaturen (`jarsigner`) und fragt,
+ob man dem Herausgeber (Zertifikat, SHA-256-Fingerabdruck) vertraut. Die Antwort wird in
+`~/.hexagon-applauncher-mac/trusted_signers.json` gespeichert. Ohne Terminal-Rückfrage:
+`--trust-signer <SHA-256>`. Prüfung abschalten (nicht empfohlen): `--no-verify`.
+
 Der Link ist ein Zugangsschlüssel zur Session – nicht weitergeben oder committen.
 
 ## Aufbau

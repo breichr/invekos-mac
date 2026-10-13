@@ -17,12 +17,17 @@ Nutzung:
   python3 hexagon_launcher.py --inspect 'hnlps://…'   # nur Descriptor anzeigen
   python3 hexagon_launcher.py 'hnlps://…'             # herunterladen + starten
   python3 hexagon_launcher.py --jdk 17 'hnlps://…'    # bestimmte Java-Version
+
+JAR-Signaturen werden beim Download mit jarsigner geprüft (wie JarVerifier im Original).
+Unbekannte Herausgeber muss man einmal bestätigen (Abfrage oder --trust-signer <SHA-256>);
+sie werden in ~/.hexagon-applauncher-mac/trusted_signers.json gespeichert.
 """
 import argparse
 import hashlib
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -31,7 +36,12 @@ import zipfile
 from pathlib import Path
 
 BASE = Path.home() / ".hexagon-applauncher-mac"
+TRUST_FILE = BASE / "trusted_signers.json"
 UA = "Java-http-client/17"  # wie der Original-Launcher (java.net.http)
+
+
+class VerifyError(Exception):
+    pass
 
 
 def to_http(url: str) -> str:
@@ -83,6 +93,79 @@ def safe_name(href: str, res_hash: str = None) -> str:
     return hashlib.sha1(key.encode()).hexdigest()[:10] + "_" + name
 
 
+def jdk_tool(java: str, name: str) -> str:
+    """jarsigner/keytool aus demselben JDK wie `java`, sonst aus PATH."""
+    p = Path(shutil.which(java) or java).resolve().parent / name
+    if p.exists():
+        return str(p)
+    tool = shutil.which(name)
+    if not tool:
+        raise VerifyError(f"{name} nicht gefunden (JDK statt JRE installieren oder --no-verify)")
+    return tool
+
+
+def run_tool(tool: str, *args: str):
+    # Ausgabe ist lokalisiert -> Englisch erzwingen, damit sie auswertbar ist
+    r = subprocess.run([tool, "-J-Duser.language=en", *args], capture_output=True, text=True)
+    return r.returncode, r.stdout + r.stderr
+
+
+def jar_signers(java: str, jar: Path) -> dict:
+    """Prüft die Signatur eines JARs, liefert {SHA-256-Fingerabdruck: Owner} der Signer."""
+    rc, out = run_tool(jdk_tool(java, "jarsigner"), "-verify", str(jar))
+    if rc != 0:
+        raise VerifyError("Signatur ungültig:\n" + out.strip())
+    if "jar is unsigned" in out:
+        raise VerifyError("JAR ist nicht signiert")
+    if "unsigned entries" in out:
+        raise VerifyError("JAR enthält nicht signierte Einträge")
+    if "jar verified" not in out:
+        raise VerifyError("unerwartete jarsigner-Ausgabe:\n" + out.strip())
+    rc, out = run_tool(jdk_tool(java, "keytool"), "-printcert", "-jarfile", str(jar))
+    signers = {}
+    for block in out.split("Signer #")[1:]:  # erstes Zertifikat je Signer = Signer-Zertifikat
+        fp = re.search(r"^\s*SHA256: ([0-9A-F:]+)\s*$", block, re.M)
+        owner = re.search(r"^\s*Owner: (.*)$", block, re.M)
+        if fp:
+            signers[fp.group(1)] = owner.group(1).strip() if owner else "?"
+    if rc != 0 or not signers:
+        raise VerifyError("Signer nicht ermittelbar:\n" + out.strip())
+    return signers
+
+
+def normalize_fp(fp: str) -> str:
+    h = re.sub(r"[^0-9A-Fa-f]", "", fp).upper()
+    if len(h) != 64:
+        sys.exit(f"Ungültiger SHA-256-Fingerabdruck: {fp}")
+    return ":".join(h[i:i + 2] for i in range(0, 64, 2))
+
+
+def load_trusted() -> dict:
+    try:
+        return json.loads(TRUST_FILE.read_text())
+    except FileNotFoundError:
+        return {}
+
+
+def save_trusted(trusted: dict) -> None:
+    TRUST_FILE.write_text(json.dumps(trusted, indent=2, ensure_ascii=False))
+
+
+def check_trust(signers: dict, trusted: dict, name: str) -> None:
+    """Wie im Original: unbekannte Signer muss der Nutzer bestätigen."""
+    if any(fp in trusted for fp in signers):
+        return
+    print(f"\n{name} ist von einem unbekannten Herausgeber signiert:")
+    for fp, owner in signers.items():
+        print(f"  {owner}\n  SHA-256: {fp}")
+    if not sys.stdin.isatty():
+        raise VerifyError("Herausgeber nicht bestätigt – mit --trust-signer <SHA-256> erlauben")
+    if input("Diesem Herausgeber vertrauen? [j/N] ").strip().lower() not in ("j", "ja", "y", "yes"):
+        raise VerifyError("Herausgeber abgelehnt")
+    trusted.update(signers)
+    save_trusted(trusted)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("url", help="hnlps://… bzw. https://… Descriptor-URL")
@@ -90,6 +173,9 @@ def main() -> int:
     ap.add_argument("--java", default=shutil.which("java") or "java")
     ap.add_argument("--dry-run", action="store_true", help="laden, aber Java nicht starten")
     ap.add_argument("--jdk", help="Java-Version wählen, z. B. 17 (via /usr/libexec/java_home)")
+    ap.add_argument("--trust-signer", action="append", default=[], metavar="SHA256",
+                    help="JAR-Herausgeber (Zertifikat-Fingerabdruck) dauerhaft vertrauen")
+    ap.add_argument("--no-verify", action="store_true", help="JAR-Signaturen NICHT prüfen")
     a = ap.parse_args()
     if a.jdk:
         home = subprocess.check_output(["/usr/libexec/java_home", "-v", a.jdk], text=True).strip()
@@ -97,6 +183,11 @@ def main() -> int:
 
     url = to_http(a.url)
     BASE.mkdir(parents=True, exist_ok=True)
+    trusted = load_trusted()
+    if a.trust_signer:
+        for fp in a.trust_signer:
+            trusted[normalize_fp(fp)] = "per --trust-signer"
+        save_trusted(trusted)
     raw = fetch(url)
     (BASE / "descriptor.json").write_bytes(raw)
     d = json.loads(raw)
@@ -109,6 +200,8 @@ def main() -> int:
     cache = BASE / "cache"
     cache.mkdir(exist_ok=True)
     jars, natives, skipped_native = [], [], []
+    if a.no_verify:
+        print("\n⚠ JAR-Signaturen werden nicht geprüft (--no-verify)")
 
     for r in d.get("resources", []):
         typ = r["type"].upper()
@@ -120,9 +213,20 @@ def main() -> int:
             continue
         # JARs sind plattformunabhängig – Filter nur, wenn eine Mac-Variante existiert
         target = cache / safe_name(href, r.get("hash"))
+        if typ == "JAR" and a.no_verify:
+            target = target.with_name("unverified_" + target.name)  # nie als geprüft weiterverwenden
         if not target.exists():
             print(f"lade {r['href']}")
-            target.write_bytes(fetch(href))
+            part = target.with_name(target.name + ".part")
+            part.write_bytes(fetch(href))
+            if typ == "JAR" and not a.no_verify:
+                try:
+                    check_trust(jar_signers(a.java, part), trusted, r["href"])
+                except VerifyError as e:
+                    part.unlink()
+                    print(f"\n✗ {r['href']}: {e}", file=sys.stderr)
+                    return 1
+            part.replace(target)  # im Cache liegen nur geprüfte JARs
         if typ == "JAR":
             jars.append(str(target))
         elif typ == "NATIVELIB":

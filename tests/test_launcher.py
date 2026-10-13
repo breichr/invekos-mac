@@ -1,5 +1,6 @@
 """End-to-end-Test gegen einen lokalen Fake-Server (nur Standardbibliothek + JDK)."""
 import functools
+import hashlib
 import http.server
 import json
 import os
@@ -23,8 +24,24 @@ class QuietHandler(http.server.SimpleHTTPRequestHandler):
         pass
 
 
-@unittest.skipUnless(shutil.which("javac") and shutil.which("java"), "JDK fehlt")
+@unittest.skipUnless(all(map(shutil.which, ["javac", "java", "keytool", "jarsigner"])), "JDK fehlt")
 class LauncherE2E(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.keydir = Path(tempfile.mkdtemp())
+        cls.ks = ["-keystore", str(cls.keydir / "ks"), "-storepass", "secret"]
+        subprocess.run(["keytool", "-genkeypair", *cls.ks, "-keypass", "secret", "-alias", "t",
+                        "-dname", "CN=Test Signer", "-keyalg", "EC", "-validity", "3650"],
+                       check=True, capture_output=True)
+        der = subprocess.run(["keytool", "-exportcert", *cls.ks, "-alias", "t"],
+                             check=True, capture_output=True).stdout
+        h = hashlib.sha256(der).hexdigest().upper()
+        cls.fp = ":".join(h[i:i + 2] for i in range(0, 64, 2))
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.keydir, ignore_errors=True)
+
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
         self.srv = srv = self.tmp / "srv"
@@ -40,12 +57,32 @@ class LauncherE2E(unittest.TestCase):
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
         self.url = f"hnlp://127.0.0.1:{port}/d.json"
 
-    def build_jar(self, greeting):
+    def compile_hello(self, greeting):
         srv = self.srv
         (srv / "Hello.java").write_text(HELLO % greeting)
         subprocess.check_call(["javac", "-d", str(srv / "c"), str(srv / "Hello.java")])
-        with zipfile.ZipFile(srv / "app.jar", "w") as z:
-            z.write(srv / "c" / "Hello.class", "Hello.class")
+        return (srv / "c" / "Hello.class").read_bytes()
+
+    def build_jar(self, greeting, sign=True):
+        with zipfile.ZipFile(self.srv / "app.jar", "w") as z:
+            z.writestr("Hello.class", self.compile_hello(greeting))
+        if sign:
+            subprocess.run(["jarsigner", *self.ks, str(self.srv / "app.jar"), "t"],
+                           check=True, capture_output=True)
+
+    def rewrite_jar(self, replace=None, add=None):
+        """Signiertes app.jar nachträglich verändern (Einträge ersetzen/hinzufügen)."""
+        jar = self.srv / "app.jar"
+        with zipfile.ZipFile(jar) as z:
+            entries = {n: z.read(n) for n in z.namelist()}
+        entries.update(replace or {})
+        entries.update(add or {})
+        with zipfile.ZipFile(jar, "w") as z:
+            for n, data in entries.items():
+                z.writestr(n, data)
+
+    def cached_jars(self):
+        return sorted(p.name for p in (self.tmp / ".hexagon-applauncher-mac" / "cache").glob("*app.jar*"))
 
     def write_descriptor(self):
         (self.srv / "d.json").write_text(json.dumps(self.descriptor))
@@ -61,10 +98,13 @@ class LauncherE2E(unittest.TestCase):
         self.httpd.server_close()
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def run_launcher(self, *args):
+    def run_launcher(self, *args, trust=True):
         env = dict(os.environ, HOME=str(self.tmp), no_proxy="127.0.0.1", NO_PROXY="127.0.0.1")
+        if trust:
+            args = ("--trust-signer", self.fp, *args)
         return subprocess.run([sys.executable, str(LAUNCHER), *args, self.url],
-                              env=env, capture_output=True, text=True, timeout=120)
+                              env=env, capture_output=True, text=True, timeout=120,
+                              stdin=subprocess.DEVNULL)  # keine interaktive Rückfrage
 
     def test_inspect(self):
         r = self.run_launcher("--inspect")
@@ -77,6 +117,47 @@ class LauncherE2E(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("HELLO args=site=demo x=1", r.stdout)
         self.assertIn("win.zip", r.stdout)  # Warnung: Windows-native übersprungen
+        self.assertEqual(len(self.cached_jars()), 1)
+        self.assertFalse(self.cached_jars()[0].startswith("unverified_"))
+
+    def test_untrusted_signer(self):
+        r = self.run_launcher(trust=False)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn(self.fp, r.stdout)
+        self.assertIn("CN=Test Signer", r.stdout)
+        self.assertIn("--trust-signer", r.stderr)
+        self.assertEqual(self.cached_jars(), [])  # nichts Ungeprüftes im Cache
+        self.assertEqual(self.run_launcher().returncode, 0)
+        self.set_jar_hash("v2")  # erneuter Download, Vertrauen ist gespeichert
+        r = self.run_launcher(trust=False)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("lade app.jar", r.stdout)
+
+    def test_tampered_jar(self):
+        self.rewrite_jar(replace={"Hello.class": self.compile_hello("BOESE")})
+        r = self.run_launcher()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("Signatur ungültig", r.stderr)
+        self.assertNotIn("BOESE", r.stdout)
+        self.assertEqual(self.cached_jars(), [])
+
+    def test_unsigned_entry(self):
+        self.rewrite_jar(add={"Extra.class": b"x"})
+        r = self.run_launcher()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("nicht signierte Einträge", r.stderr)
+
+    def test_unsigned_jar(self):
+        self.build_jar("HELLO", sign=False)
+        r = self.run_launcher()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("nicht signiert", r.stderr)
+        r = self.run_launcher("--no-verify")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("HELLO args=", r.stdout)
+        self.assertTrue(self.cached_jars()[0].startswith("unverified_"))
+        r = self.run_launcher()  # ungeprüfte Kopie wird ohne --no-verify nicht verwendet
+        self.assertEqual(r.returncode, 1)
 
     def test_hash_cache(self):
         self.set_jar_hash("v1")
