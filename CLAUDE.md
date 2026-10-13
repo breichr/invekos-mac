@@ -37,9 +37,11 @@ plattformunabhängiges Python-Skript nach.
   braucht die native `ecwjp2`-Bibliothek. Auf arm64: `UnsatisfiedLinkError … NCSEcw_javaJNI.swig_module_init`.
   Es gibt nur `mac os x/x86_64`-Natives → **x86_64-JDK unter Rosetta** nötig.
 - `IllegalAccessException` für `com.apple.eawt.FullScreenUtilities` (Vollbild-Button) →
-  Launcher setzt auf macOS `--add-opens java.desktop/com.apple.eawt=ALL-UNNAMED`.
+  Launcher setzt auf macOS `--add-opens java.desktop/com.apple.eawt=ALL-UNNAMED`. (2. Start: Fehler weg).
 - Harmlos: Warnung „COMPAT locale provider will be removed", WSP0075/WSP0019 (JAX-WS-Policy).
 - Cache-Namen kommen jetzt aus dem `resource`-Parameter (vorher alle `…_downloads`).
+- 2. Start (2026-10-13): alle JARs signaturgeprüft geladen, Verbindung ok („Connected To: G01/M02"),
+  ECW-Fehler wie erwartet (arm64).
 
 ## Kernerkenntnisse (Kurzfassung)
 - Der Launcher ist selbst Java (JavaFX), per jlink in `modules` eingebettet; Module
