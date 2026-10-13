@@ -58,29 +58,61 @@ def resolve(codebase: str, href: str) -> str:
     return href if "://" in href else codebase + href
 
 
-def platform_matches(res: dict) -> bool:
-    """Gleiche Logik wie AppResource.checkPlatform() – aber für dieses System."""
-    osname = platform.system().lower()            # 'darwin' / 'linux'
-    osname = "mac os x" if osname == "darwin" else osname  # Java: os.name
-    arch = platform.machine().lower()             # 'arm64' / 'x86_64'
-    java_arch = {"arm64": "aarch64", "x86_64": "x86_64", "amd64": "amd64"}.get(arch, arch)
+def java_platform(java: str) -> tuple:
+    """(os.name, os.arch) des Java, das gestartet wird – lowercase, wie im Original.
+    Entscheidend für native Bibliotheken: ein x86_64-JDK unter Rosetta braucht
+    x86_64-Natives, auch wenn Python selbst arm64 ist."""
+    try:
+        r = subprocess.run([java, "-XshowSettings:properties", "-version"],
+                           capture_output=True, text=True, timeout=30)
+        props = dict(re.findall(r"^\s*(os\.name|os\.arch) = (.*?)\s*$", r.stderr, re.M))
+        if "os.name" in props and "os.arch" in props:
+            return props["os.name"].lower(), props["os.arch"].lower()
+    except OSError:
+        pass
+    # Fallback ohne Java: aus Python ableiten (Java-Schreibweise)
+    osname = platform.system().lower()
+    osname = "mac os x" if osname == "darwin" else osname
+    arch = platform.machine().lower()
+    return osname, {"arm64": "aarch64", "x86_64": "amd64" if osname == "linux" else "x86_64"}.get(arch, arch)
+
+
+def platform_matches(res: dict, plat: tuple) -> bool:
+    """Gleiche Logik wie AppResource.checkPlatform(): os.name.startsWith(os), os.arch == arch."""
+    osname, arch = plat
     if res.get("os") and not osname.startswith(res["os"].lower()):
         return False
-    if res.get("arch") and res["arch"].lower() not in (java_arch, arch):
+    if res.get("arch") and res["arch"].lower() != arch:
         return False
     return True
 
 
-def summarize(d: dict) -> None:
+def expand_vars(arg: str) -> str:
+    """Windows-Variablen wie %LOCALAPPDATA% in jvmArgs/appArgs ersetzen (Java tut das nicht).
+    LOCALAPPDATA/APPDATA -> Programmdaten-Ordner des Systems, sonst Umgebungsvariable."""
+    if sys.platform == "darwin":
+        appdata = str(Path.home() / "Library" / "Application Support")
+    else:
+        appdata = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+    defaults = {"LOCALAPPDATA": appdata, "APPDATA": appdata}
+
+    def sub(m):
+        name = m.group(1)
+        return os.environ.get(name) or defaults.get(name.upper(), m.group(0))
+    return re.sub(r"%([A-Za-z_][A-Za-z0-9_]*)%", sub, arg)
+
+
+def summarize(d: dict, plat: tuple) -> None:
     print(f"appName   : {d.get('appName')}")
     print(f"version   : {d.get('version')}")
     print(f"codebase  : {d.get('codebase')}")
     print(f"mainClass : {d.get('mainClass')}")
     print(f"jvmArgs   : {d.get('jvmArgs')}")
     print(f"appArgs   : {d.get('appArgs')}")
+    print(f"Plattform : os={plat[0]} arch={plat[1]} (laut Java)")
     print("resources :")
     for r in d.get("resources", []):
-        tag = "OK " if platform_matches(r) else "-- "
+        tag = "OK " if platform_matches(r, plat) else "-- "
         print(f"  {tag}{r.get('type'):9} os={r.get('os')!s:8} arch={r.get('arch')!s:7} {r.get('href')}")
     print("\n(OK = passt laut os/arch-Filter zu diesem Mac, -- = für anderes System)")
 
@@ -191,7 +223,8 @@ def main() -> int:
     raw = fetch(url)
     (BASE / "descriptor.json").write_bytes(raw)
     d = json.loads(raw)
-    summarize(d)
+    plat = java_platform(a.java)
+    summarize(d, plat)
     print(f"\nDescriptor gespeichert: {BASE / 'descriptor.json'}")
     if a.inspect:
         return 0
@@ -208,7 +241,7 @@ def main() -> int:
         href = resolve(codebase, r["href"])
         if typ in ("JRE", "SETUP", "IMAGE"):
             continue  # eigenes Java statt Windows-JRE, kein Self-Update
-        if typ == "NATIVELIB" and not platform_matches(r):
+        if typ == "NATIVELIB" and not platform_matches(r, plat):
             skipped_native.append(r["href"])
             continue
         # JARs sind plattformunabhängig – Filter nur, wenn eine Mac-Variante existiert
@@ -241,10 +274,10 @@ def main() -> int:
         for s in skipped_native:
             print("   ", s)
 
-    cmd = [a.java, *d.get("jvmArgs", []),
+    cmd = [a.java, *map(expand_vars, d.get("jvmArgs", [])),
            "-cp", os.pathsep.join(jars),
            f"-Djava.library.path={os.pathsep.join(natives)}",
-           d["mainClass"], *d.get("appArgs", [])]
+           d["mainClass"], *map(expand_vars, d.get("appArgs", []))]
     print("\nStart:", " ".join(cmd))
     if a.dry_run:
         return 0

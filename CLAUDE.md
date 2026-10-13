@@ -11,7 +11,25 @@ plattformunabhängiges Python-Skript nach.
   Ergebnis in `docs/launcher-analysis.md`.
 - `src/hexagon_launcher.py` implementiert den Ablauf (Descriptor laden → Ressourcen laden → Java starten).
   Gegen einen Fake-Server getestet (`tests/`), **noch nicht gegen den echten AMA-Server**.
-- Offen: echten Descriptor holen (`--inspect`) und auswerten → siehe „Nächste Schritte".
+- Echter Descriptor geholt (`--inspect`, 2026-10-13) – Ergebnis unten, „Echter AMA-Descriptor".
+- Offen: erster echter Start → siehe „Nächste Schritte".
+
+## Echter AMA-Descriptor (anonymisiert)
+- `appName` GeoMedia Smart Client, `version` 1.17.2.0, `mainClass` `com.intergraph.web.SmartClient`,
+  `codebase` `https://gsc.services.ama.at:443/GMSC/api/v1/hnlp/smartclient/downloads`,
+  hrefs relativ als `?resource=jars%2f<name>.jar&type=jar`.
+- `jvmArgs`: `-Djava.locale.providers=COMPAT,CLDR -Xmx1024m` (COMPAT gibt es bis JDK 22 → JDK 21 ok).
+- `appArgs`: `codebase=…/GMSC/`, `site=GMSC`, `directory.default.root=%LOCALAPPDATA%/Intergraph/SmartClient`,
+  `directory.default.cache=…/cache`, `sessionid=<UUID, geheim>`, `requesttype=hnlp`.
+  → Launcher ersetzt `%LOCALAPPDATA%`/`%APPDATA%` (macOS: `~/Library/Application Support`).
+- JRE im Original: `java-runtime-image-18.0.1.12-windows-x64` → wir nutzen Liberica JDK 21 Full.
+- ~150 JARs ohne os/arch, darunter `javafx-*-17.0.0.1-win.jar` (Windows-JavaFX; bei JDK mit
+  eingebautem JavaFX gewinnen dessen Module, die Klassen auf dem Classpath werden ignoriert)
+  und `bridj-0.7.0-windows-only.jar`.
+- `nativelib`: `ecwjp2-jni` (ECW/JPEG2000-Rasterformat) für linux/amd64, **mac os x/x86_64**,
+  windows/amd64, windows/x86; `gmsc-jni-geolocator` nur windows/amd64 (Standortbestimmung).
+  Auf Apple Silicon (arm64-JDK, `os.arch=aarch64`) passt keine → ECW-Raster evtl. nicht lesbar.
+  Ausweg falls nötig: x86_64-JDK unter Rosetta (Launcher filtert nach `os.arch` des gestarteten Java).
 
 ## Kernerkenntnisse (Kurzfassung)
 - Der Launcher ist selbst Java (JavaFX), per jlink in `modules` eingebettet; Module
@@ -42,12 +60,10 @@ plattformunabhängiges Python-Skript nach.
 - Sprache für Doku/Ausgaben: Deutsch.
 
 ## Nächste Schritte
-1. Am Mac: hnlps-URL abgreifen (Chrome DevTools-Konsole: „Failed to launch 'hnlps://…'")
-   und `python3 src/hexagon_launcher.py --inspect '<url>'` laufen lassen.
-2. Descriptor auswerten: JRE-Version → passendes `liberica-jdk<N>-full` installieren;
-   gibt es `nativelib` nur für `windows`? Wenn ja: Inhalt der ZIPs prüfen (welche DLLs, wofür).
-3. Starten mit `--jdk <N>`; Fehler/Stacktraces analysieren (fehlende natives, JavaFX, Pfad-Trenner,
-   Windows-spezifische Pfade in jvmArgs/appArgs).
+1. ~~Descriptor holen und auswerten~~ (erledigt, siehe oben).
+2. `brew bundle` (JDK 21 Full), dann Start mit `--jdk 21` (frische hnlps-URL, Session läuft ab).
+3. Fehler/Stacktraces analysieren (JavaFX-Konflikt mit `-win`-JARs, fehlende Natives, Pfade).
+   Prüfen, ob Orthofotos ohne `ecwjp2`-Natives angezeigt werden (vermutlich per WMS/WMTS → ja).
 4. Beim ersten echten Start: angezeigten Signer (Hexagon-Zertifikat?) prüfen und bestätigen.
 5. Optional: `hnlps://`-URL-Handler als kleine macOS-App (z. B. AppleScript/Platypus oder
    Swift-Stub), damit der Button in eAMA direkt startet.

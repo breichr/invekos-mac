@@ -4,6 +4,7 @@ import hashlib
 import http.server
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -100,6 +101,8 @@ class LauncherE2E(unittest.TestCase):
 
     def run_launcher(self, *args, trust=True):
         env = dict(os.environ, HOME=str(self.tmp), no_proxy="127.0.0.1", NO_PROXY="127.0.0.1")
+        for var in ("LOCALAPPDATA", "APPDATA", "XDG_DATA_HOME"):
+            env.pop(var, None)
         if trust:
             args = ("--trust-signer", self.fp, *args)
         return subprocess.run([sys.executable, str(LAUNCHER), *args, self.url],
@@ -119,6 +122,28 @@ class LauncherE2E(unittest.TestCase):
         self.assertIn("win.zip", r.stdout)  # Warnung: Windows-native übersprungen
         self.assertEqual(len(self.cached_jars()), 1)
         self.assertFalse(self.cached_jars()[0].startswith("unverified_"))
+
+    def test_platform_natives_and_vars(self):
+        out = subprocess.run(["java", "-XshowSettings:properties", "-version"],
+                             capture_output=True, text=True).stderr
+        props = dict(re.findall(r"^\s*(os\.name|os\.arch) = (.*?)\s*$", out, re.M))
+        with zipfile.ZipFile(self.srv / "own.jar", "w") as z:
+            z.writestr("libown.so", "x")
+        self.descriptor["resources"] += [
+            {"type": "nativelib", "href": "own.jar", "os": props["os.name"], "arch": props["os.arch"]},
+            {"type": "nativelib", "href": "other.jar", "os": props["os.name"], "arch": "sparc"},
+        ]
+        self.descriptor["appArgs"] = ["dir=%LOCALAPPDATA%/X", "keep=%UNBEKANNT%"]
+        self.write_descriptor()
+        r = self.run_launcher()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(f"os={props['os.name'].lower()} arch={props['os.arch'].lower()}", r.stdout)
+        natives = list((self.tmp / ".hexagon-applauncher-mac" / "cache").glob("*own.jar.d"))
+        self.assertEqual(len(natives), 1)
+        self.assertIn(f"-Djava.library.path={natives[0]} ", r.stdout)
+        self.assertIn("other.jar", r.stdout)  # andere Architektur -> übersprungen
+        appdata = self.tmp / ("Library/Application Support" if sys.platform == "darwin" else ".local/share")
+        self.assertIn(f"HELLO args=dir={appdata}/X,keep=%UNBEKANNT%", r.stdout)
 
     def test_untrusted_signer(self):
         r = self.run_launcher(trust=False)

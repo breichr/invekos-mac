@@ -9,7 +9,7 @@ Java-Anwendung mit einem per Homebrew installierten JDK.
 
 ## Installation
 ```sh
-brew bundle            # Liberica JDK 17 Full (mit JavaFX), p7zip
+brew bundle            # Liberica JDK 21 Full (mit JavaFX), p7zip
 ```
 
 ## Nutzung
@@ -19,9 +19,9 @@ brew bundle            # Liberica JDK 17 Full (mit JavaFX), p7zip
    ```sh
    python3 src/hexagon_launcher.py --inspect 'hnlps://…'
    ```
-3. Starten (Java-Version laut Descriptor):
+3. Starten (AMA-Descriptor verlangt Java 18 → JDK 21 verwenden):
    ```sh
-   python3 src/hexagon_launcher.py --jdk 17 'hnlps://…'
+   python3 src/hexagon_launcher.py --jdk 21 'hnlps://…'
    ```
 
 Beim ersten Download prüft der Launcher die JAR-Signaturen (`jarsigner`) und fragt,
