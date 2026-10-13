@@ -9,7 +9,8 @@ Java-Anwendung mit einem per Homebrew installierten JDK.
 
 ## Installation
 ```sh
-brew bundle            # Liberica JDK 21 Full (mit JavaFX), p7zip
+brew trust bell-sw/liberica   # offizieller Tap von BellSoft; neuere Homebrew-Versionen verlangen das
+brew bundle                   # Liberica JDK 21 Full (mit JavaFX), p7zip
 ```
 
 ## Nutzung
