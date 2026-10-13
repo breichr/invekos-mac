@@ -18,6 +18,11 @@ FIXTURE = ROOT / "tests" / "fixtures" / "descriptor.json"
 HELLO = 'public class Hello { public static void main(String[] a){ System.out.println("%s args=" + String.join(",", a) + " x=" + System.getProperty("x")); } }'
 
 
+class QuietHandler(http.server.SimpleHTTPRequestHandler):
+    def log_message(self, *args):
+        pass
+
+
 @unittest.skipUnless(shutil.which("javac") and shutil.which("java"), "JDK fehlt")
 class LauncherE2E(unittest.TestCase):
     def setUp(self):
@@ -27,8 +32,7 @@ class LauncherE2E(unittest.TestCase):
         self.build_jar("HELLO")
         with zipfile.ZipFile(srv / "win.zip", "w") as z:
             z.writestr("dummy.dll", "x")
-        handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(srv))
-        handler.log_message = lambda *a, **k: None
+        handler = functools.partial(QuietHandler, directory=str(srv))
         self.httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
         port = self.httpd.server_address[1]
         self.descriptor = json.loads(FIXTURE.read_text().replace("{PORT}", str(port)))
@@ -54,6 +58,7 @@ class LauncherE2E(unittest.TestCase):
 
     def tearDown(self):
         self.httpd.shutdown()
+        self.httpd.server_close()
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def run_launcher(self, *args):
